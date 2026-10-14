@@ -1,0 +1,16 @@
+/* Public browser key. Private database keys must never be placed in this file. */
+class PartiuLiveAPI {
+ constructor(storage=localStorage,fetcher=fetch){this.storage=storage;this.fetcher=fetcher;this.base='https://sfeqxbupekfznctlazpx.supabase.co';this.key='sb_publishable_2zlEf2TO5h7Odpyr34pjCg_uw69Tepb';this.session=null;this.refreshing=null;try{this.session=JSON.parse(storage.getItem('partiu-live-session')||'null')}catch{}}
+ async auth(){if(this.authenticating)return this.authenticating;this.authenticating=this.authenticate();try{return await this.authenticating}finally{this.authenticating=null}}
+ async authenticate(){if(this.session?.access_token){if((this.session.expires_at||0)<Date.now()/1000+60)await this.refresh();return this.session.user.id}const s=await this.call('/auth/v1/signup',{method:'POST',body:JSON.stringify({data:{purpose:'partiu-private-test'}})},false);this.saveSession(s);return s.user.id}
+ saveSession(s){if(!s?.access_token||!s.user?.id)throw Error('Não foi possível abrir sua sessão de teste.');this.session={access_token:s.access_token,refresh_token:s.refresh_token,expires_at:s.expires_at||Date.now()/1000+s.expires_in,user:{id:s.user.id}};this.storage.setItem('partiu-live-session',JSON.stringify(this.session))}
+ async refresh(){if(this.refreshing)return this.refreshing;this.refreshing=(async()=>{if(!this.session?.refresh_token)throw Error('Entre novamente no teste.');const s=await this.call('/auth/v1/token?grant_type=refresh_token',{method:'POST',body:JSON.stringify({refresh_token:this.session.refresh_token})},false);this.saveSession(s)})();try{await this.refreshing}finally{this.refreshing=null}}
+ async call(path,options={},authorized=true,retry=true){const ctl=new AbortController(),timeout=setTimeout(()=>ctl.abort(),15000);try{const headers={apikey:this.key,'Content-Type':'application/json',...options.headers};if(authorized){if(!this.session?.access_token)throw Error('Abra uma sessão de teste primeiro.');headers.Authorization='Bearer '+this.session.access_token}const r=await this.fetcher(this.base+path,{...options,headers,signal:ctl.signal});let data;try{data=await r.json()}catch{data=null}if(r.status===401&&authorized&&retry){await this.refresh();return this.call(path,options,true,false)}if(!r.ok)throw Error(data?.msg||data?.message||data?.error_description||'Serviço indisponível. Tente novamente.');return data}catch(e){if(e.name==='AbortError')throw Error('A conexão demorou demais. Verifique sua internet.');throw e}finally{clearTimeout(timeout)}}
+ async rpc(name,args){await this.auth();return this.call('/rest/v1/rpc/'+name,{method:'POST',body:JSON.stringify(args)})}
+ async read(id){await this.auth();const rows=await this.call('/rest/v1/partiu_test_rides?id=eq.'+encodeURIComponent(id)+'&select=*');return rows?.[0]||null}
+ create(details){return this.rpc('partiu_create_test',{p_details:details})}
+ join(code,driver){return this.rpc('partiu_join_test',{p_code:code,p_driver:driver})}
+ transition(id,status){return this.rpc('partiu_transition_test',{p_id:id,p_status:status})}
+ position(id,p){return this.rpc('partiu_position_test',{p_id:id,p_lat:p.lat,p_lng:p.lng,p_accuracy:p.accuracy})}
+}
+if(typeof module!=='undefined')module.exports=PartiuLiveAPI;else globalThis.PartiuLiveAPI=PartiuLiveAPI;
